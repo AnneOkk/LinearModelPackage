@@ -1,4 +1,4 @@
-from encoders import DistanceTransformer, TimeFeaturesEncoder
+from TaxiFareModel.encoders import DistanceTransformer, TimeFeaturesEncoder
 from utils import compute_rmse
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
@@ -42,6 +42,7 @@ class Trainer():
     def run(self):
         """set and train the pipeline"""
         self.pipeline.fit(self.X, self.y)
+        self.set_pipeline()
         return self.pipeline
 
     def evaluate(self, X, y):
