@@ -70,7 +70,7 @@ class Trainer(object):
 
         self.pipeline = Pipeline([
             ('preproc', preproc_pipe),
-            ('tpot', TPOTRegressor())
+            ('tpot', TPOTRegressor(config_dict = 'TPOT sparse'))
         ])
 
     def run(self):
@@ -82,6 +82,7 @@ class Trainer(object):
         """evaluates the pipeline on df_test and return the RMSE"""
         y_pred = self.pipeline.predict(X_test)
         print(self.pipeline.score(X_test, y_test))
+        self.pipeline.export('tpot_exported_pipeline.py')
         rmse = compute_rmse(y_pred, y_test)
         self.mlflow_log_metric("rmse", rmse)
         return round(rmse, 2)
@@ -129,7 +130,7 @@ if __name__ == "__main__":
     X = df.drop("fare_amount", axis=1)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
     # Train and save model, locally and
-    trainer = Trainer(X=X_train, y=y_train, n_jobs=-1, nrows=100000)
+    trainer = Trainer(X=X_train, y=y_train, n_jobs=-1, nrows=10000)
     trainer.set_experiment_name(EXPERIMENT_NAME)
     trainer.run()
     rmse = trainer.evaluate(X_test, y_test)
