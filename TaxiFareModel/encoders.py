@@ -1,10 +1,14 @@
-from sklearn.base import BaseEstimator, TransformerMixin
 import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
 from TaxiFareModel.utils import haversine_vectorized
 
+
 class TimeFeaturesEncoder(BaseEstimator, TransformerMixin):
-    """Extract the day of week (dow), the hour, the month and the year from a
-    time column."""
+    """
+        Extract the day of week (dow), the hour, the month and the year from a time column.
+        Returns a copy of the DataFrame X with only four columns: 'dow', 'hour', 'month', 'year'
+    """
+
     def __init__(self, time_column, time_zone_name='America/New_York'):
         self.time_column = time_column
         self.time_zone_name = time_zone_name
@@ -25,7 +29,11 @@ class TimeFeaturesEncoder(BaseEstimator, TransformerMixin):
 
 
 class DistanceTransformer(BaseEstimator, TransformerMixin):
-    """Compute the haversine distance between two GPS points."""
+    """
+        Compute the haversine distance between two GPS points.
+        Returns a copy of the DataFrame X with only one column: 'distance'
+    """
+
     def __init__(self,
                  start_lat="pickup_latitude",
                  start_lon="pickup_longitude",

@@ -1,18 +1,25 @@
-from TaxiFareModel.encoders import DistanceTransformer, TimeFeaturesEncoder
-from utils import compute_rmse
-from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+import joblib
+from termcolor import colored
+import mlflow
+from TaxiFareModel.data_getter import get_data, clean_data, df_optimized
+from TaxiFareModel.encoders import TimeFeaturesEncoder, DistanceTransformer
+from TaxiFareModel.utils import compute_rmse
+from memoized_property import memoized_property
+from mlflow.tracking import MlflowClient
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import OneHotEncoder
 from sklearn.model_selection import train_test_split
-import data_getter
-import pandas as pd
-from memoized_property import memoized_property
-import mlflow
-from mlflow.tracking import MlflowClient
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from TaxiFareModel.params import STORAGE_LOCATION, BUCKET_NAME
+from google.cloud import storage
+from TaxiFareModel.gcp import storage_upload
 
-class Trainer():
+MLFLOW_URI = "https://mlflow.lewagon.ai/"
+EXPERIMENT_NAME = "[DE][BERLIN][AnneOkk]"
+
+
+class Trainer(object):
     def __init__(self, X, y):
         """
             X: pandas DataFrame
@@ -21,8 +28,12 @@ class Trainer():
         self.pipeline = None
         self.X = X
         self.y = y
-        self.MLFLOW_URI = "https://mlflow.lewagon.ai/"
-        self.EXPERIMENT_NAME = "[DE] [Berlin] [AnneOkk] First_mod"
+        # for MLFlow
+        self.experiment_name = EXPERIMENT_NAME
+
+    def set_experiment_name(self, experiment_name):
+        '''defines the experiment name for MLFlow'''
+        self.experiment_name = experiment_name
 
     def set_pipeline(self):
         """defines the pipeline as a class attribute"""
@@ -35,40 +46,66 @@ class Trainer():
             ('ohe', OneHotEncoder(handle_unknown='ignore'))
         ])
         preproc_pipe = ColumnTransformer([
-            ('distance', dist_pipe, ["pickup_latitude", "pickup_longitude", 'dropoff_latitude', 'dropoff_longitude']),
+            ('distance', dist_pipe, [
+                "pickup_latitude",
+                "pickup_longitude",
+                'dropoff_latitude',
+                'dropoff_longitude'
+            ]),
             ('time', time_pipe, ['pickup_datetime'])
         ], remainder="drop")
+
         self.pipeline = Pipeline([
             ('preproc', preproc_pipe),
             ('linear_model', LinearRegression())
         ])
 
-
     def run(self):
-        """set and train the pipeline"""
         self.set_pipeline()
+        params = dict(nrows=10000,
+              upload=True,
+              local=False,  # set to False to get data from GCP (Storage or BigQuery)
+              gridsearch=False,
+              optimize=True,
+              estimator="xgboost",
+              mlflow=True,  # set to True to log params to mlflow
+              experiment_name=experiment,
+              pipeline_memory=None, # None if no caching and True if caching expected
+              distance_type="manhattan",
+              feateng=["distance_to_center", "direction", "distance", "time_features", "geohash"],
+              n_jobs=-1) # Try with njobs=1 and njobs = -1
+        self.pipeline.set_params(params)
+        self.mlflow_log_param("model", "Linear")
         self.pipeline.fit(self.X, self.y)
-        return self.pipeline
 
-    def evaluate(self, X, y):
+    def evaluate(self, X_test, y_test):
         """evaluates the pipeline on df_test and return the RMSE"""
-        y_pred = self.pipeline.predict(X)
-        rmse = compute_rmse(y_pred, y)
-        return rmse
+        y_pred = self.pipeline.predict(X_test)
+        rmse = compute_rmse(y_pred, y_test)
+        self.mlflow_log_metric("rmse", rmse)
+        return round(rmse, 2)
 
 
+    def save_model(self):
+        """Save the model into a .joblib format"""
+        joblib.dump(self.pipeline, 'model.joblib')
+        print(colored("model.joblib saved locally", "green"))
+        print(f"uploaded model.joblib to gcp cloud storage under \n => {STORAGE_LOCATION}")
+
+
+# MLFlow methods
     @memoized_property
     def mlflow_client(self):
-        MLFLOW_URI = self.MLFLOW_URI
         mlflow.set_tracking_uri(MLFLOW_URI)
         return MlflowClient()
 
     @memoized_property
     def mlflow_experiment_id(self):
         try:
-            return self.mlflow_client.create_experiment(self.EXPERIMENT_NAME)
+            return self.mlflow_client.create_experiment(self.experiment_name)
         except BaseException:
-            return self.mlflow_client.get_experiment_by_name(self.EXPERIMENT_NAME).experiment_id
+            return self.mlflow_client.get_experiment_by_name(
+                self.experiment_name).experiment_id
 
     @memoized_property
     def mlflow_run(self):
@@ -80,24 +117,21 @@ class Trainer():
     def mlflow_log_metric(self, key, value):
         self.mlflow_client.log_metric(self.mlflow_run.info.run_id, key, value)
 
+
 if __name__ == "__main__":
-    # get data
-    # clean data
-    # set X and y
-    # hold out
-    # train
-    # evaluate
-    df = data_getter.get_data()
-    df_clean = data_getter.clean_data(df)
-    y = df_clean["fare_amount"]
-    X = df_clean.drop("fare_amount", axis=1)
-    X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=0.15)
-    inst = Trainer(X = X_train, y = y_train)
-    pipeline = inst.set_pipeline()
-    inst.run()
-    rmse = inst.evaluate(X = X_val, y = y_val)
-    print(rmse)
-    inst.mlflow_log_param('estimator', 'lin reg')
-    inst.mlflow_log_metric('rmsea', rmse)
-    experiment_id = inst.mlflow_experiment_id
-    print(f"experiment URL: https://mlflow.lewagon.ai/#/experiments/{experiment_id}")
+    # Get and clean data
+    N = 10000
+    df = get_data(nrows=N)
+    df = clean_data(df)
+    df = df_optimized(df)
+    y = df["fare_amount"]
+    X = df.drop("fare_amount", axis=1)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
+    # Train and save model, locally and
+    trainer = Trainer(X=X_train, y=y_train)
+    trainer.set_experiment_name(EXPERIMENT_NAME)
+    trainer.run()
+    rmse = trainer.evaluate(X_test, y_test)
+    print(f"rmse: {rmse}")
+    trainer.save_model()
+    storage_upload(STORAGE_LOCATION, bucket=BUCKET_NAME, rm=False)

@@ -1,0 +1,15 @@
+artifact_uri: file:///Users/anne/code/AnneOkk/TaxiFareModel/mlruns/1/284f6da4d3294c6b933fb7a62df51af0/artifacts
+end_time: null
+entry_point_name: ''
+experiment_id: '1'
+lifecycle_stage: active
+name: ''
+run_id: 284f6da4d3294c6b933fb7a62df51af0
+run_uuid: 284f6da4d3294c6b933fb7a62df51af0
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1651164858090
+status: 1
+tags: []
+user_id: unknown
