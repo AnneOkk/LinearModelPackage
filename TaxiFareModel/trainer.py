@@ -14,13 +14,14 @@ from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from TaxiFareModel.params import STORAGE_LOCATION, BUCKET_NAME
 from google.cloud import storage
 from TaxiFareModel.gcp import storage_upload
+from tpot import TPOTRegressor
 
 MLFLOW_URI = "https://mlflow.lewagon.ai/"
 EXPERIMENT_NAME = "[DE][BERLIN][AnneOkk]"
 
 
 class Trainer(object):
-    def __init__(self, X, y):
+    def __init__(self, X, y, **kwargs):
         """
             X: pandas DataFrame
             y: pandas Series
@@ -30,6 +31,18 @@ class Trainer(object):
         self.y = y
         # for MLFlow
         self.experiment_name = EXPERIMENT_NAME
+        self.params = dict(nrows=10000,
+                           upload=True,
+                           local=False,  # set to False to get data from GCP (Storage or BigQuery)
+                           gridsearch=False,
+                           optimize=True,
+                           estimator="xgboost",
+                           mlflow=True,  # set to True to log params to mlflow
+                           experiment_name=EXPERIMENT_NAME,
+                           pipeline_memory=None, # None if no caching and True if caching expected
+                           distance_type="manhattan",
+                           feateng=["distance_to_center", "direction", "distance", "time_features", "geohash"],
+                           n_jobs=-1) # Try with njobs=1 and njobs = -1
 
     def set_experiment_name(self, experiment_name):
         '''defines the experiment name for MLFlow'''
@@ -57,30 +70,18 @@ class Trainer(object):
 
         self.pipeline = Pipeline([
             ('preproc', preproc_pipe),
-            ('linear_model', LinearRegression())
+            ('tpot', TPOTRegressor())
         ])
 
     def run(self):
         self.set_pipeline()
-        params = dict(nrows=10000,
-              upload=True,
-              local=False,  # set to False to get data from GCP (Storage or BigQuery)
-              gridsearch=False,
-              optimize=True,
-              estimator="xgboost",
-              mlflow=True,  # set to True to log params to mlflow
-              experiment_name=experiment,
-              pipeline_memory=None, # None if no caching and True if caching expected
-              distance_type="manhattan",
-              feateng=["distance_to_center", "direction", "distance", "time_features", "geohash"],
-              n_jobs=-1) # Try with njobs=1 and njobs = -1
-        self.pipeline.set_params(params)
         self.mlflow_log_param("model", "Linear")
         self.pipeline.fit(self.X, self.y)
 
     def evaluate(self, X_test, y_test):
         """evaluates the pipeline on df_test and return the RMSE"""
         y_pred = self.pipeline.predict(X_test)
+        print(self.pipeline.score(X_test, y_test))
         rmse = compute_rmse(y_pred, y_test)
         self.mlflow_log_metric("rmse", rmse)
         return round(rmse, 2)
@@ -128,7 +129,7 @@ if __name__ == "__main__":
     X = df.drop("fare_amount", axis=1)
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3)
     # Train and save model, locally and
-    trainer = Trainer(X=X_train, y=y_train)
+    trainer = Trainer(X=X_train, y=y_train, n_jobs=-1, nrows=100000)
     trainer.set_experiment_name(EXPERIMENT_NAME)
     trainer.run()
     rmse = trainer.evaluate(X_test, y_test)
